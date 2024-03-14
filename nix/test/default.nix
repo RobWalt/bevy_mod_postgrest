@@ -34,7 +34,7 @@
           shellHook = '' 
           # PostgreSQL server variables for testing
           export PGDATA=$(mktemp -d)
-          export PGPORT=5432
+          export PGPORT=11111
           export PGHOST="$PGDATA/run/postgresql"
           export POSTGREST_CONF="$PGDATA/postgrest.conf"
 

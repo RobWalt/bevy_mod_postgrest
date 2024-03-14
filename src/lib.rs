@@ -21,12 +21,12 @@ impl Plugin for BevyPostgrestRPCPlugin {
             EventListenerPlugin::<GoodResponse>::default(),
             EventListenerPlugin::<BadResponse>::default(),
         ))
-        .add_systems(Update, (Self::handle_new_requests, Self::handle_responses));
+        .add_systems(Update, (Self::handle_requests, Self::handle_responses));
     }
 }
 
 impl BevyPostgrestRPCPlugin {
-    fn handle_new_requests(
+    fn handle_requests(
         mut commands: Commands,
         added_requests: Query<(Entity, &RPCRequest), Added<RPCRequest>>,
     ) {
@@ -90,6 +90,13 @@ fn create_request(
     }
 }
 
+// === resources ===
+
+#[derive(Debug, Clone, Resource, Deref, DerefMut)]
+pub struct RPCResource<T: DeserializeOwned>(pub T);
+
+// === entity events ===
+
 #[derive(Clone, Event, EntityEvent)]
 struct GoodResponse {
     #[target]
@@ -123,6 +130,9 @@ pub struct RPCRequest {
     params: String,
 }
 
+#[derive(Debug, Clone, Component, Default, Reflect)]
+pub struct RPCResponse<T: DeserializeOwned>(pub T);
+
 #[derive(Bundle)]
 pub struct RPCRequestBundle {
     request: RPCRequest,
@@ -131,14 +141,36 @@ pub struct RPCRequestBundle {
 }
 
 impl RPCRequestBundle {
-    pub fn new<T: DeserializeOwned + Component>(url: &str, params: &str) -> Option<Self> {
+    pub fn new_as_resource<T: DeserializeOwned + Send + Sync + 'static>(
+        url: &str,
+        params: &str,
+    ) -> Option<Self> {
         let (base, function) = url.rsplit_once("/")?;
         let request = RPCRequest {
             base: base.to_string(),
             function: function.to_string(),
             params: params.to_string(),
         };
-        let on_good = On::<GoodResponse>::run(handle_good::<T>);
+        let on_good = On::<GoodResponse>::run(handle_good_as_resource::<T>);
+        let on_bad = On::<BadResponse>::run(handle_bad);
+        Some(Self {
+            request,
+            on_good,
+            on_bad,
+        })
+    }
+
+    pub fn new_as_component<T: DeserializeOwned + Send + Sync + 'static>(
+        url: &str,
+        params: &str,
+    ) -> Option<Self> {
+        let (base, function) = url.rsplit_once("/")?;
+        let request = RPCRequest {
+            base: base.to_string(),
+            function: function.to_string(),
+            params: params.to_string(),
+        };
+        let on_good = On::<GoodResponse>::run(handle_good_as_component::<T>);
         let on_bad = On::<BadResponse>::run(handle_bad);
         Some(Self {
             request,
@@ -148,19 +180,36 @@ impl RPCRequestBundle {
     }
 }
 
-fn handle_good<T: DeserializeOwned + Component>(
+// === helpers ===
+
+fn handle_good_as_component<T: DeserializeOwned + Send + Sync + 'static>(
     mut commands: Commands,
     resp: Listener<GoodResponse>,
 ) {
     match serde_json::from_str::<T>(resp.content.as_str()) {
         Ok(val) => {
-            commands.entity(resp.entity).insert(val);
+            commands.entity(resp.entity).insert(RPCResponse::<T>(val));
         }
         Err(error) => {
             error!("{error:?}");
         }
     };
     commands.entity(resp.entity).remove::<RPCRequestBundle>();
+}
+
+fn handle_good_as_resource<T: DeserializeOwned + Send + Sync + 'static>(
+    mut commands: Commands,
+    resp: Listener<GoodResponse>,
+) {
+    match serde_json::from_str::<T>(resp.content.as_str()) {
+        Ok(val) => {
+            commands.insert_resource(RPCResource(val));
+        }
+        Err(error) => {
+            error!("{error:?}");
+        }
+    };
+    commands.entity(resp.entity).despawn_recursive();
 }
 
 fn handle_bad(mut commands: Commands, resp: Listener<BadResponse>) {
