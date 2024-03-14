@@ -789,12 +789,10 @@ dependencies = [
  "async-compat",
  "bevy",
  "bevy_eventlistener",
- "chrono",
  "crossbeam",
  "postgrest",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -1809,6 +1807,19 @@ checksum = "feedafcaa9b749175d5ac357452a9d41ea2911da598fde46ce1fe02c37751291"
 dependencies = [
  "event-listener 5.2.0",
  "pin-project-lite",
+]
+
+[[package]]
+name = "examples-runner"
+version = "0.0.0"
+dependencies = [
+ "bevy",
+ "bevy_mod_postgrest",
+ "chrono",
+ "postgrest",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

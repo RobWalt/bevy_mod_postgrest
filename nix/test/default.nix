@@ -1,65 +1,83 @@
 { inputs, ... }:
 {
-  perSystem = { pkgs, system, ... }:
+  perSystem = { pkgs, lib, system, ... }:
     let
-      rust = import ./../rust.nix { inherit inputs system; };
+      rust = import ./rust.nix { inherit inputs system; };
       # this is basically the postgrest tutorial setup and should suffice for testing purposes
-      postgrest-db-setup = ''"${builtins.replaceStrings ["$"] ["\\$"] (builtins.readFile ./init_db.sql)}"'';
+      postgrest-db-setup = ''${builtins.replaceStrings ["$"] ["\\$"] (builtins.readFile ./init_db.sql)}'';
+      runtimeInputs = [
+        pkgs.pkg-config
+        pkgs.udev
+        pkgs.alsaLib
+        pkgs.vulkan-loader
+        pkgs.wayland
+        pkgs.libxkbcommon
+        pkgs.openssl
+
+        pkgs.cargo-nextest
+        pkgs.postgresql
+        pkgs.postgrest
+
+        pkgs.curl
+
+        rust.stable
+      ];
+      # this drops into a dev shell first since I couldn't find a way to configure the LD_LIBRARY_PATH in writeShellApplication
+      runInDevshell = { name, runtimeInputs, text }:
+        let
+          realCommand = pkgs.writeShellApplication { inherit name runtimeInputs text; };
+        in
+        pkgs.writeShellApplication {
+          name = "${name}-outer";
+          runtimeInputs = [ ];
+          text = "nix develop --command ${realCommand}/bin/${name}";
+        };
     in
     {
-      devShells = rec {
-        run-test = pkgs.mkShell rec {
-          packages = [
-            pkgs.pkg-config
-            pkgs.udev
-            pkgs.alsaLib
-            pkgs.vulkan-loader
-            pkgs.wayland
-            pkgs.libxkbcommon
-            pkgs.openssl
-
-            pkgs.cargo-nextest
-            pkgs.postgresql
-            pkgs.postgrest
-
-            (pkgs.writeShellScriptBin "cleanup" '' 
-            ${pkgs.postgresql}/bin/pg_ctl -D $PGDATA stop
-            rm -rf $PGDATA 
-            rm -rf /run/postgresql
-            '')
-
-            rust.stable
-          ];
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath packages;
-          shellHook = '' 
+      packages = {
+        build-and-test-definition = runInDevshell {
+          name = "build-and-tests";
+          inherit runtimeInputs;
+          text = '' 
+          cargo build --release 
+          cargo nextest run --release 
+          '';
+        };
+        examples-runner-definition = runInDevshell rec {
+          name = "examples";
+          inherit runtimeInputs;
+          text = '' 
           # PostgreSQL server variables for testing
-          export PGDATA=$(mktemp -d)
-          export PGPORT=11111
-          export PGHOST="$PGDATA/run/postgresql"
-          export POSTGREST_CONF="$PGDATA/postgrest.conf"
+          PGDATA=$(mktemp -d)
+          PGPORT=5432
+          PGHOST="$PGDATA/run/postgresql"
+          POSTGREST_CONF="$PGDATA/postgrest.conf"
 
           # init the database
-          initdb -D $PGDATA
+          initdb -D "$PGDATA"
+
           # create run directory
-          mkdir -p $PGHOST
+          mkdir -p "$PGHOST"
           # set run directory in config
-          echo "unix_socket_directories = '$PGHOST'" >> $PGDATA/postgresql.auto.conf
+          echo "unix_socket_directories = '$PGHOST'" >> "$PGDATA/postgresql.auto.conf"
           # start the database
-          pg_ctl -D $PGDATA start
+          pg_ctl -D "$PGDATA" start
 
           # create user and db
-          createuser
-          createdb
+          createuser -h "$PGHOST" || true
+          createdb -h "$PGHOST" || true
           
           # create dummy data
-          psql -c ${postgrest-db-setup}
+          psql -h "$PGDATA/run/postgresql" -c "${postgrest-db-setup}"
           
           # configure and start postgrest
-          echo "db-uri = \"postgres://authenticator:mysecretpassword@localhost:$PGPORT/aviac\"" > $POSTGREST_CONF
-          echo "db-schemas = \"api\"" >> $POSTGREST_CONF
-          echo "db-anon-role = \"web_anon\"" >> $POSTGREST_CONF
+          echo "db-uri = \"postgres://authenticator:mysecretpassword@localhost:$PGPORT/$(whoami)\"" > "$POSTGREST_CONF"
+          echo "db-schemas = \"api\"" >> "$POSTGREST_CONF"
+          echo "db-anon-role = \"web_anon\"" >> "$POSTGREST_CONF"
 
-          postgrest $POSTGREST_CONF &
+          echo "postgres setup complete"
+
+          postgrest "$POSTGREST_CONF" &
 
           postgrest_pid=$!
 
@@ -67,26 +85,20 @@
           sleep 1
 
           # verify it worked
-          ${pkgs.curl}/bin/curl http://localhost:3000/todos
+          curl http://localhost:3000/todos
+
+          cleanup() {
+            # stop postgrest
+            kill $postgrest_pid
+            # stop postgres
+            pg_ctl -D "$PGDATA" stop
+            # remove data dirs
+            rm -rf "$PGDATA"
+          }
 
           # Run your tests here
-          cargo nextest run --no-capture
-
-          # Clean up
-          
-          # stop postgrest
-          kill $postgrest_pid
-          # stop postgres
-          pg_ctl -D $PGDATA stop
-          # remove data dirs
-          rm -rf $PGDATA 
-          # exit shell (success)
-          exit
+          (cargo run --release -p examples-runner && cleanup && exit 0) || (cleanup && exit 1)
           '';
-        };
-
-        develop-test = pkgs.mkShell rec {
-          packages = [ pkgs.postgresql ];
         };
       };
     };

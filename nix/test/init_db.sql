@@ -10,7 +10,7 @@ insert into api.todos (task) values
   ('finish tutorial 0'), ('pat self on back');
 
 create or replace function api.get_todos()
-returns "jsonb" as $$ 
+returns \"jsonb\" as $$ 
 begin
   return (
     select json_agg(json_build_object(

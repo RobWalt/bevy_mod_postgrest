@@ -1,0 +1,14 @@
+[package]
+name = "bevy_mod_postgrest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+async-compat.workspace = true
+bevy.workspace = true
+bevy_eventlistener.workspace = true
+crossbeam.workspace = true
+postgrest.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true

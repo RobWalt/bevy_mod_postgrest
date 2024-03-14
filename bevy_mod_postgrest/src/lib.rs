@@ -1,15 +1,14 @@
+use bevy::{prelude::*, tasks::AsyncComputeTaskPool};
+use bevy_eventlistener::EntityEvent;
 use bevy_eventlistener::{
     callbacks::Listener,
     event_listener::{EntityEvent, On},
     EventListenerPlugin,
 };
-use serde::de::DeserializeOwned;
-use std::future::Future;
-
-use bevy::{prelude::*, tasks::AsyncComputeTaskPool};
-use bevy_eventlistener::EntityEvent;
 use crossbeam::channel::{bounded, Receiver, Sender};
 use postgrest::Postgrest;
+use serde::de::DeserializeOwned;
+use std::future::Future;
 
 // === plugin ===
 
